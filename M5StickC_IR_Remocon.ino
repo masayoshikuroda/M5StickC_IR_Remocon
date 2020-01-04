@@ -29,10 +29,6 @@ BLEServer* createServer(char* name, bool* pConnected) {
   pServer->setCallbacks(new ServerCallbacks(pConnected));  
 };
 
-
-
-
-
 uint16_t hton(uint16_t h) {
   uint8_t n[2];
   n[0] = *((uint8_t*)&h + 1);
@@ -97,6 +93,14 @@ void SerialPrint(char* msg, uint64_t data, uint16_t nbits, uint16_t repeat) {
   Serial.print(repeat); Serial.println("");
 };
 
+void SerialPrint(char* msg, uint32_t address, uint64_t data, uint16_t nbits, uint16_t repeat) {
+  Serial.print(msg);    Serial.print(", ");
+  SerialPrint(address); Serial.print(", ");
+  SerialPrint(data);    Serial.print(", ");
+  Serial.print(nbits);  Serial.print(", ");
+  Serial.print(repeat); Serial.println("");
+};
+
 void M5LcdPrint(uint8_t v) {
   if (v<0x10) {
     M5.Lcd.print("0");
@@ -133,6 +137,15 @@ void M5LcdPrint(char* msg, uint64_t data, uint16_t nbits, uint16_t repeat) {
   
 };
 
+void M5LcdPrint(char* msg, uint32_t address, uint32_t data, uint16_t nbits, uint16_t repeat) {
+  M5.Lcd.print(msg);    M5.Lcd.print(", ");
+  M5LcdPrint(address);  M5.Lcd.print(", ");
+  M5LcdPrint(data);     M5.Lcd.print(", ");
+  M5.Lcd.print(nbits);  M5.Lcd.print(", ");
+  M5.Lcd.print(repeat); M5.Lcd.println("");
+  
+};
+
 #define ir_sensor "f000aa00-0451-4000-b000-000000000000"
 #define ir_nec    "f000aa01-0451-4000-b000-000000000000"
 #define ir_sony   "f000aa02-0451-4000-b000-000000000000"
@@ -144,9 +157,9 @@ IRsend irsend(kIrLed);
 class NecIRCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
     const char* pValue = pCharacteristic->getValue().c_str();
-    uint64_t data = htonll(*(uint64_t*)pValue);
-    uint16_t nbits = hton(*(uint16_t*)(pValue + 4));
-    uint16_t repeat = *(uint16_t*)(pValue + 5);
+    uint64_t data = htonll(*(uint64_t*)(pValue +  0));
+    uint16_t nbits  = hton(*(uint16_t*)(pValue +  8));
+    uint16_t repeat = hton(*(uint16_t*)(pValue + 10));
     irsend.sendNEC(data, nbits, repeat);
     M5LcdPrint( "SEND NEC: ", data, nbits, repeat);
     SerialPrint("SEND NEC: ", data, nbits, repeat);
@@ -156,9 +169,9 @@ class NecIRCallbacks : public BLECharacteristicCallbacks {
 class SonyIRCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
     const char* pValue = pCharacteristic->getValue().c_str();
-    uint64_t data = htonll(*(uint64_t*)pValue);
-    uint16_t nbits = hton(*(uint16_t*)(pValue + 4));
-    uint16_t repeat = *(uint16_t*)(pValue + 5);
+    uint64_t data = htonll(*(uint64_t*)(pValue +  0));
+    uint16_t nbits  = hton(*(uint16_t*)(pValue +  8));
+    uint16_t repeat = hton(*(uint16_t*)(pValue + 10));
     irsend.sendSony(data, nbits, repeat);
     M5LcdPrint( "SEND SONY: ", data, nbits, repeat);
     SerialPrint("SEND SONY: ", data, nbits, repeat);
@@ -168,33 +181,34 @@ class SonyIRCallbacks : public BLECharacteristicCallbacks {
 class PanasonicIRCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
     const char* pValue = pCharacteristic->getValue().c_str();
-    uint16_t address = hton(*(uint16_t*)pValue);
+    uint16_t address  = hton(*(uint16_t*)(pValue + 0));
     uint32_t data   =  htonl(*(uint32_t*)(pValue + 2));
-    uint16_t nbits = hton(*(uint16_t*)(pValue + 6));
-    uint16_t repeat = *(uint16_t*)(pValue + 8);    
+    uint16_t nbits    = hton(*(uint16_t*)(pValue + 6));
+    uint16_t repeat   = hton(*(uint16_t*)(pValue + 8));    
     irsend.sendPanasonic(address, data, nbits, repeat);
-    M5.Lcd.print("SEND PANASONIC: "); M5.Lcd.print(address, HEX); M5.Lcd.print(", "); M5.Lcd.println(data, HEX); M5.Lcd.print(nbits); M5.Lcd.print(", "); M5.Lcd.println(repeat);
-    Serial.print("SEND PANASONIC: "); Serial.print(address, HEX); Serial.print(", "); Serial.println(data, HEX); Serial.print(nbits); Serial.print(", "); Serial.println(repeat);
+    M5LcdPrint( "SEND PANASONIC: ", address, data, nbits, repeat);
+    SerialPrint("SEND PANASONIC: ", address, data, nbits, repeat);
   }  
 };
 
-class UInt32IRCharacteristic : public BLECharacteristic {
+class IRCharacteristic : public BLECharacteristic {
 public:
-  UInt32IRCharacteristic(const char* uuid, BLECharacteristicCallbacks* pCallbacks) : BLECharacteristic(BLEUUID(uuid)) {
+  IRCharacteristic(const char* uuid, BLECharacteristicCallbacks* pCallbacks, std::string value) : BLECharacteristic(BLEUUID(uuid)) {
     this->setCallbacks(pCallbacks);
     this->setReadProperty(true);
     this->setWriteProperty(true);
-    uint32_t value = 0x00000000;
     this->setValue(value);   
   }
 };
 
 BLEService* createIRService(BLEServer* pServer) {
   BLEService* pService = pServer->createService(ir_sensor);
-  pService->addCharacteristic(new UInt32IRCharacteristic(ir_nec,  new NecIRCallbacks()));
-  pService->addCharacteristic(new UInt32IRCharacteristic(ir_sony, new SonyIRCallbacks()));
-  pService->addCharacteristic(new UInt32IRCharacteristic(ir_pana, new PanasonicIRCallbacks()));
-  
+  char n[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0xFD, 0x62, 0x9D, 0x00, 0x20, 0x00, 0x00};
+  char s[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x2B, 0x4F, 0x00, 0x14, 0x00, 0x03};
+  char p[] = {0x40, 0x04, 0x40, 0x04, 0x01, 0x64, 0x0A, 0x6F, 0x00, 0x30, 0x00, 0x03};
+  pService->addCharacteristic(new IRCharacteristic(ir_nec,  new NecIRCallbacks(),       std::string(n, std::end(n))));
+  pService->addCharacteristic(new IRCharacteristic(ir_sony, new SonyIRCallbacks(),      std::string(s, std::end(s))));
+  pService->addCharacteristic(new IRCharacteristic(ir_pana, new PanasonicIRCallbacks(), std::string(p, std::end(p))));
   return pService;
 };
 
@@ -231,17 +245,21 @@ void setup() {
 
 void loop() {
   if (M5.BtnA.wasReleased()) {
-    uint64_t data = 0x082B4F;
-    uint16_t nbits = 20;
-    uint16_t rep = 3;
-    irsend.sendSony(data, nbits, rep);
-    M5LcdPrint( "SEND SONY: ", data, nbits, rep);
-    SerialPrint("SEND SONY: ", data, nbits, rep);
+    uint64_t data = 0x0000000000FD629D;
+    uint16_t nbits = 0x0020;
+    uint16_t repeat = 0x0000;
+    irsend.sendNEC(data, nbits, repeat);
+    //irsend.sendNEC(0xFD629D, 32);
+    M5LcdPrint( "SEND NEC : ", data, nbits, repeat);
+    SerialPrint("SEND NEC : ", data, nbits, repeat); 
   }
   if (M5.BtnB.wasReleased()) {
-    M5.Lcd.fillScreen(BLACK);
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setCursor(0, 0);
+    uint64_t data = 0x0000000000082B4F;
+    uint16_t nbits = 0x0014;
+    uint16_t repeat = 0x0003;    
+    irsend.sendSony(data, nbits, repeat);
+    M5LcdPrint( "SEND SONY: ", data, nbits, repeat);
+    SerialPrint("SEND SONY: ", data, nbits, repeat); 
   }
   delay(300);
   M5.update();
